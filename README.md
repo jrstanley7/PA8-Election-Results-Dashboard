@@ -2,7 +2,7 @@
 
 An interactive precinct-level map of Pennsylvania's 8th Congressional District (Lackawanna, Wayne, Pike, and the PA-8 parts of Luzerne and Monroe counties), covering the 2022, 2024 and 2026 general elections.
 
-**Open the map:** `index.html` (one self-contained page; it works offline or on GitHub Pages).
+**Open the map:** https://jrstanley7.github.io/PA8-Election-Results-Dashboard/ (or open `index.html` directly; it is one self-contained page and works offline).
 
 > **2026 results are unofficial.** They come from the counties' election-night reports and will change slightly when the counties certify.
 
@@ -58,7 +58,7 @@ To change the page itself, edit `src/template.html` and rerun `scripts/render.py
 
 ## Hosting on GitHub Pages
 
-In the repository, open **Settings → Pages**, choose **Deploy from a branch**, pick `main` and `/ (root)`, and save. The map is then served at `https://<username>.github.io/<repository>/`.
+In the repository, open **Settings → Pages**, choose **Deploy from a branch**, pick `main` and `/ (root)`, and save. The map is then served at https://jrstanley7.github.io/PA8-Election-Results-Dashboard/.
 
 ## Layout
 
