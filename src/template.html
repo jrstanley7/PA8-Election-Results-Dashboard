@@ -884,7 +884,10 @@ function renderDetail(p) {
     if (s != null) html += `<p class="cmp">Since ${cmp.label}: ${fmtM(contested(b.d, b.r))} → ${fmtM(contested(a.d, a.r))}, shift <b>${fmtM(s)}</b>. D votes ${fmt(b.d)} → ${fmt(a.d)} (${pct(a.d / b.d)} kept), R votes ${fmt(b.r)} → ${fmt(a.r)} (${pct(a.r / b.r)} kept).</p>`;
   });
   const rm = regMargin(p);
-  Object.entries(res(p)).forEach(([k, r]) => {
+  // the race picked in the Race row comes first; the rest keep the ballot order
+  const races = Object.entries(res(p));
+  if (!current.turnout) races.sort((a, b) => current.match(b[0]) - current.match(a[0]));
+  races.forEach(([k, r]) => {
     html += `<h3>${prettyContest(k)}</h3>`;
     const v = contested(sumParty(r, "DEM "), sumParty(r, "REP "));
     if (v != null && rm != null) html += `<p class="cmp">Vote <b>${fmtM(v)}</b> vs. registration <b>${fmtM(rm)}</b> · ${fmtShift(v - rm)}</p>`;
