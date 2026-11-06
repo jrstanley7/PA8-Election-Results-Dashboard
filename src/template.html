@@ -157,6 +157,52 @@ circle.bub.out { opacity: .15; }
 .ptable tbody tr.sel { outline: 2px solid var(--focus); outline-offset: -2px; }
 .ptable tbody tr:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .toast { font-size: .8rem; color: var(--muted); }
+/* County / district / display rows: always open on wide screens, folded under a summary on phones */
+.more { display: block; min-width: 0; }
+/* the details element's own box cannot limit its children's width, so an inner grid does */
+.more-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+.more > summary { display: none; }
+/* results card shown on the map when a precinct is tapped on a touch screen */
+.mtip { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 6; background: var(--panel); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / .22); padding: 10px 12px;
+  font-size: .85rem; line-height: 1.35; font-variant-numeric: tabular-nums; display: grid; gap: 6px; }
+.mtip b { font-family: var(--display); font-size: 1rem; letter-spacing: .02em; }
+.mtip .mtip-row { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.mtip button { flex: none; }
+.mapstack { position: relative; }
+@media (max-width: 700px) {
+  .wrap { gap: 10px; padding-block: 12px 24px; }
+  h1 { font-size: 1.6rem; }
+  .sub { font-size: .85rem; }
+  /* each control row: label above, buttons on one line that scrolls sideways */
+  /* the page grid must not grow to fit a long button row: rows scroll inside the screen instead */
+  .wrap { grid-template-columns: minmax(0, 1fr); }
+  .viewrow, .viewrow .tabs, .more { min-width: 0; }
+  .viewrow { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 4px; margin-top: 0; }
+  .viewrow .lbl { min-width: 0; }
+  .viewrow .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
+    -webkit-mask-image: linear-gradient(to right, #000 88%, transparent); mask-image: linear-gradient(to right, #000 88%, transparent); }
+  .viewrow .tabs::-webkit-scrollbar { display: none; }
+  .viewrow .tabs button { flex: none; padding: 7px 11px; font-size: .9rem; }
+  .more-body { gap: 10px; margin-top: 10px; }
+  .more > summary { display: block; list-style: none; cursor: pointer; font: 600 .85rem var(--display); letter-spacing: .06em;
+    text-transform: uppercase; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px; }
+  .more > summary::-webkit-details-marker { display: none; }
+  .more > summary::after { content: " ▾"; color: var(--muted); }
+  .more[open] > summary::after { content: " ▴"; }
+  .mapbox { padding: 8px; }
+  #map { max-height: none; }
+  .mapbar { padding-right: 0; }
+  .share code { display: none; }
+  .zoomctl { top: 60px; right: 14px; }
+  .zoomctl button { min-width: 40px; height: 40px; }
+  .legend { gap: 4px 10px; }
+  .ramp span, .ramp-labels span { width: 22px; }
+  .ptable { max-height: 420px; }
+  .ptable table { font-size: .8rem; }
+  .ptable td:first-child { min-width: 9em; }
+  .board { gap: 10px; }
+}
 @media (prefers-reduced-motion: no-preference) { #map path.p { transition: fill .25s; } }
 </style>
 
@@ -180,6 +226,9 @@ circle.bub.out { opacity: .15; }
     <span class="lbl">Data</span>
     <nav class="tabs" id="views" aria-label="Data"></nav>
   </div>
+  <details class="more" id="more" open>
+  <summary>County, district and display options</summary>
+  <div class="more-body">
   <div class="controls viewrow">
     <span class="lbl">County</span>
     <nav class="tabs" id="counties" aria-label="County"></nav>
@@ -196,6 +245,8 @@ circle.bub.out { opacity: .15; }
     <span class="lbl">Display</span>
     <nav class="tabs" id="display" aria-label="Display"></nav>
   </div>
+  </div>
+  </details>
 
   <div class="board">
     <div class="mapbox">
@@ -227,8 +278,9 @@ circle.bub.out { opacity: .15; }
         <button type="button" id="zoom-reset" aria-label="Reset zoom" title="Reset zoom">Reset</button>
       </div>
       <div class="tip" id="tip" hidden></div>
+      <div class="mtip" id="mtip" hidden></div>
       <div class="legend" id="legend"></div>
-      <div class="zoomhint">Ctrl + scroll (⌘ + scroll on Mac), pinch, double-click or + / − to zoom; drag to move around.</div>
+      <div class="zoomhint" id="zoomhint">Ctrl + scroll (⌘ + scroll on Mac), pinch, double-click or + / − to zoom; drag to move around.</div>
     </div>
     <div class="side">
       <section class="card" id="totals"></section>
@@ -605,20 +657,30 @@ function pin(f) {
   paths.classed("sel", d => d === pinned);
   if (pinned) paths.filter(d => d === pinned).raise();
   renderDetail(pinned ? pinned.properties : null);
+  updateMtip();
   document.querySelectorAll("#ptable tbody tr").forEach(tr => tr.classList.toggle("sel", tableState.rows[+tr.dataset.i] && tableState.rows[+tr.dataset.i].f === pinned));
 }
 drawUnits();
 // Clicking away from a pinned precinct clears it; clicks on another precinct, the detail panel, the table,
 // the search box or the zoom buttons keep their own behavior
 document.addEventListener("click", ev => {
-  if (!pinned || ev.target.closest("#map path.p, #detail, #ptable tbody tr, .searchbox, .zoomctl")) return;
+  if (!pinned || ev.target.closest("#map path.p, #detail, #ptable tbody tr, .searchbox, .zoomctl, #mtip")) return;
   pin(null);
 });
 
 const tip = document.getElementById("tip");
+const touchScreen = () => matchMedia("(hover: none)").matches;
 function showTip(ev, f) {
-  if (matchMedia("(hover: none)").matches) return;
-  const p = f.properties, box = document.querySelector(".mapbox").getBoundingClientRect();
+  if (touchScreen()) return;
+  const box = document.querySelector(".mapbox").getBoundingClientRect();
+  tip.innerHTML = tipHTML(f.properties);
+  tip.hidden = false;
+  const x = ev.clientX - box.left + 14, y = ev.clientY - box.top + 14;
+  tip.style.left = Math.min(x, box.width - tip.offsetWidth - 8) + "px";
+  tip.style.top = Math.min(y, box.height - tip.offsetHeight - 8) + "px";
+}
+// What the precinct shows for the current race and data view (hover tip and tap card)
+function tipHTML(p) {
   let line = "No results loaded for " + year;
   const rm = regMargin(p);
   if (view === "turnchg") {
@@ -645,11 +707,18 @@ function showTip(ev, f) {
         .map(([n, v]) => `${splitCand(n).name} ${pct(v / tot)}`).join("<br>");
     }
   }
-  tip.innerHTML = `<b>${p.name}</b> · ${p.county}<br>${line}`;
-  tip.hidden = false;
-  const x = ev.clientX - box.left + 14, y = ev.clientY - box.top + 14;
-  tip.style.left = Math.min(x, box.width - tip.offsetWidth - 8) + "px";
-  tip.style.top = Math.min(y, box.height - tip.offsetHeight - 8) + "px";
+  return `<b>${p.name}</b> · ${p.county}<br>${line}`;
+}
+// On touch screens a tapped precinct gets a small results card on the map, with a jump to its full details
+function updateMtip() {
+  const el = document.getElementById("mtip");
+  if (!pinned || !touchScreen()) { el.hidden = true; return; }
+  el.innerHTML = `<div>${tipHTML(pinned.properties)}</div><div class="mtip-row">
+    <button type="button" class="smallbtn" id="mtip-more">Full results ↓</button>
+    <button type="button" class="smallbtn" id="mtip-close" aria-label="Close">✕</button></div>`;
+  el.hidden = false;
+  document.getElementById("mtip-more").onclick = () => document.getElementById("detail").scrollIntoView({ behavior: "smooth", block: "start" });
+  document.getElementById("mtip-close").onclick = () => pin(null);
 }
 
 function candRows(results, total) {
@@ -1044,6 +1113,7 @@ function render() {
   renderMaps();
   renderTotals(); renderLegend(); renderChrome();
   renderDetail(pinned ? pinned.properties : null);
+  updateMtip();
   renderTable();
   writeHash();
   document.getElementById("unit-precinct").setAttribute("aria-pressed", unitMode === "precinct");
@@ -1199,6 +1269,9 @@ applyCounty(false);
 document.getElementById("zoom-in").onclick = () => zoomBy(1.6);
 document.getElementById("zoom-out").onclick = () => zoomBy(1 / 1.6);
 document.getElementById("zoom-reset").onclick = () => zoomReset(true);
+if (matchMedia("(max-width: 700px)").matches) document.getElementById("more").open = false;
+if (touchScreen()) document.getElementById("zoomhint").textContent = "Pinch to zoom, drag with two fingers to move around, tap a precinct for its results.";
+matchMedia("(max-width: 700px)").addEventListener("change", e => { if (!e.matches) document.getElementById("more").open = true; });
 render();
 
 // Re-read color tokens when the theme changes
