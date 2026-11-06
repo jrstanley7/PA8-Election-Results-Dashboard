@@ -1,0 +1,28 @@
+# Large public files downloaded by scripts/fetch_sources.py
+sources/state/
+sources/census/
+
+# Build cache (PDF text)
+build/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Never commit voter files or other personal data
+*voter*list*
+*juror*
+*mailing*
+Registration*.xlsx
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Local tool settings
+.claude/

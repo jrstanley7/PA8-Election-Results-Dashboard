@@ -1,0 +1,1207 @@
+<title>PA-8 Precinct Returns</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Libre+Franklin:wght@400;500;600&display=swap">
+<style>
+/* Layout: year + contest switchers over a two-column board — map left, district totals + precinct detail right; stacks on phones */
+:root {
+  --bg: #f3f4f6;
+  --panel: #ffffff;
+  --fg: #1c2230;
+  --muted: #5d6676;
+  --line: #d5d9e1;
+  --edge: #ffffff;
+  --muni: #1c2230;
+  --focus: #e0a100;
+  --d1: #e4ebf3; --d2: #b9cde3; --d3: #87a9cc; --d4: #5a83b0; --d5: #345d8a;
+  --r1: #f7e3dd; --r2: #ecbcae; --r3: #db917f; --r4: #c26a57; --r5: #96473a;
+  --y1: #e0efec; --y2: #b2d8d0; --y3: #7fbcb0; --y4: #519a8d; --y5: #2f7266;
+  --n1: #ece4ee; --n2: #d3c0d8; --n3: #b297bb;
+  --t1: #f5efe2; --t2: #e8d8b4; --t3: #d4b97f; --t4: #b4914f; --t5: #85672f;
+  --dem: #436f9f; --rep: #b65a47; --oth: #8a8f99;
+  --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --body: "Libre Franklin", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12151c; --panel: #1a1f29; --fg: #e6e9ef; --muted: #98a1b2; --line: #2c3442; --edge: #12151c; --muni: #e6e9ef; --focus: #f2c14e;
+  --dem: #93b3d6; --rep: #e39a88; --oth: #8a92a0;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #12151c; --panel: #1a1f29; --fg: #e6e9ef; --muted: #98a1b2; --line: #2c3442; --edge: #12151c; --muni: #e6e9ef; --focus: #f2c14e;
+  --dem: #93b3d6; --rep: #e39a88; --oth: #8a92a0;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 14px; line-height: 1.45; }
+.wrap { max-width: 1280px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 32px; display: grid; gap: 14px; }
+header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 8px 24px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: 2.1rem; line-height: 1; margin: 0; letter-spacing: .01em; text-wrap: balance; }
+.sub { color: var(--muted); margin-top: 4px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tabs button { font: 600 .95rem var(--display); letter-spacing: .04em; text-transform: uppercase; background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+.tabs button:hover:not(:disabled) { color: var(--fg); border-color: var(--muted); }
+.tabs button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.tabs button:disabled { cursor: not-allowed; opacity: .45; border-style: dashed; }
+button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.board { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+@media (max-width: 860px) { .board { grid-template-columns: minmax(0, 1fr); } }
+.mapbox { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; min-width: 0; position: relative; }
+/* the whole map (or the chosen county) fits on screen: height is capped and the drawing scales down to match */
+#map { width: 100%; height: auto; max-height: calc(100vh - 140px); min-height: 280px; display: block; touch-action: pan-x pan-y; }
+/* strokes keep their on-screen width when a county is zoomed in */
+#map path { vector-effect: non-scaling-stroke; }
+#map path.p { stroke: var(--edge); stroke-width: .7; cursor: pointer; }
+#map path.p:hover { stroke: var(--focus); stroke-width: 2; }
+#map path.sel { stroke: var(--focus); stroke-width: 3; }
+#map path.p.out { fill-opacity: .14; pointer-events: none; }
+#map path.muni { fill: none; stroke: var(--muni); stroke-width: 1.2; stroke-opacity: .55; pointer-events: none; }
+#map path.county { fill: none; stroke: var(--muni); stroke-width: 3; pointer-events: none; }
+#map path.dist { fill: none; stroke: var(--muni); stroke-width: 3.4; stroke-dasharray: 8 5; pointer-events: none; }
+#map text.clabel.out { display: none; }
+#map { cursor: grab; }
+#map:active { cursor: grabbing; }
+.zoomctl { position: absolute; top: 20px; right: 20px; display: grid; gap: 4px; z-index: 4; }
+.zoomctl button { min-width: 34px; height: 34px; padding: 0 8px; font: 600 1.1rem var(--display); background: var(--panel); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 4px; cursor: pointer; box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
+.zoomctl button:hover { border-color: var(--muted); }
+.zoomctl #zoom-reset { font-size: .75rem; letter-spacing: .04em; text-transform: uppercase; }
+.zoomhint { font-size: .75rem; color: var(--muted); margin-top: 6px; }
+.zoomtoast { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); background: var(--fg); color: var(--bg);
+  padding: 8px 14px; border-radius: 6px; font-size: .9rem; pointer-events: none; z-index: 6; opacity: .92; white-space: nowrap; }
+#map text.clabel { font: 700 15px var(--display); letter-spacing: .12em; text-transform: uppercase; fill: var(--fg); paint-order: stroke; stroke: var(--panel); stroke-width: 4px; pointer-events: none; }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 10px; font-size: .8rem; color: var(--muted); }
+.ramp { display: flex; align-items: center; }
+.ramp span { width: 28px; height: 12px; display: block; }
+.ramp-labels { display: flex; }
+.ramp-labels span { width: 28px; text-align: center; font-variant-numeric: tabular-nums; font-size: .72rem; }
+.key { display: grid; gap: 2px; }
+.side { display: grid; gap: 16px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; min-width: 0; }
+.eyebrow { font: 600 .78rem var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+h2 { font: 700 1.35rem/1.1 var(--display); margin: 0 0 10px; text-wrap: balance; }
+h3 { font: 600 .95rem var(--display); letter-spacing: .04em; text-transform: uppercase; margin: 12px 0 6px; color: var(--muted); }
+h3:first-child { margin-top: 0; }
+.cand { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 2px 10px; align-items: baseline; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.cand .nm { overflow-wrap: anywhere; }
+.cand .pc { font-weight: 600; min-width: 3.6em; text-align: right; }
+.cand .vt { color: var(--muted); min-width: 4.2em; text-align: right; }
+.bar { grid-column: 1 / -1; height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 4px; }
+.stats div { display: grid; }
+.stats b { font: 700 1.3rem var(--display); font-variant-numeric: tabular-nums; }
+.stats span { font-size: .75rem; color: var(--muted); }
+table.by { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: .85rem; margin-top: 4px; }
+table.by th { font: 600 .75rem var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); text-align: right; padding: 3px 0 3px 8px; border-bottom: 1px solid var(--line); }
+table.by th:first-child, table.by td:first-child { text-align: left; padding-left: 0; }
+table.by td { text-align: right; padding: 4px 0 4px 8px; border-bottom: 1px solid var(--line); }
+table.by tr:last-child td { border-bottom: 0; }
+.hint { color: var(--muted); font-size: .85rem; margin: 8px 0 0; }
+.tip { position: absolute; pointer-events: none; background: var(--fg); color: var(--bg); padding: 6px 9px; border-radius: 4px; font-size: .8rem; line-height: 1.3; max-width: 240px; z-index: 5; font-variant-numeric: tabular-nums; }
+.tip b { font-family: var(--display); font-size: .95rem; letter-spacing: .02em; }
+footer { color: var(--muted); font-size: .8rem; max-width: 80ch; }
+footer p { margin: 0 0 6px; }
+.viewrow { margin-top: -4px; }
+/* labels share one width so the button rows line up */
+.viewrow .lbl { min-width: 9.5em; font: 600 .78rem var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.viewrow .tabs button { font-size: .85rem; padding: 4px 10px; text-transform: none; letter-spacing: .02em; }
+.cmp { font-size: .82rem; color: var(--muted); margin: -2px 0 4px; font-variant-numeric: tabular-nums; }
+.cmp b { font-weight: 600; }
+/* search + share bar above the map */
+.mapbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; position: relative; z-index: 7; padding-right: 48px; }
+.searchbox { position: relative; flex: 1 1 240px; max-width: 340px; min-width: 0; }
+.searchbox input { width: 100%; font: inherit; font-size: .9rem; padding: 7px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); }
+.searchbox input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.sresults { position: absolute; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 4px 0; list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 4px 14px rgb(0 0 0 / .18); max-height: 300px; overflow-y: auto; }
+.sresults li { padding: 6px 10px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px; }
+.sresults li span { color: var(--muted); font-size: .8rem; white-space: nowrap; }
+.sresults li[aria-selected="true"], .sresults li:hover { background: var(--bg); }
+.share { display: flex; gap: 6px; align-items: center; min-width: 0; font-size: .78rem; color: var(--muted); }
+.share code { font-size: .75rem; overflow-wrap: anywhere; user-select: all; }
+.smallbtn { font: 600 .8rem var(--display); letter-spacing: .04em; text-transform: uppercase; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px; cursor: pointer; white-space: nowrap; }
+.smallbtn:hover { border-color: var(--muted); }
+.zoomctl { top: 64px; }
+/* one map, or two side by side */
+.maps { display: grid; gap: 10px; }
+.maps.duo { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 640px) { .maps.duo { grid-template-columns: minmax(0, 1fr); } }
+.mapfig { margin: 0; min-width: 0; }
+.mapfig figcaption { font: 600 .85rem var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+#map2 { width: 100%; height: auto; max-height: calc(100vh - 140px); display: block; pointer-events: none; }
+#map2 path { vector-effect: non-scaling-stroke; }
+#map2 path.p { stroke: var(--edge); stroke-width: .7; }
+#map2 path.p.out { fill-opacity: .14; }
+#map2 path.muni { fill: none; stroke: var(--muni); stroke-width: 1.2; stroke-opacity: .55; }
+#map2 path.county { fill: none; stroke: var(--muni); stroke-width: 3; }
+/* vote-size bubbles */
+circle.bub { stroke: var(--panel); stroke-width: .8; vector-effect: non-scaling-stroke; pointer-events: none; fill-opacity: .9; }
+circle.bub.out { opacity: .15; }
+/* precinct table */
+.tbl-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 8px 16px; margin-bottom: 8px; }
+.tbl-head h2 { margin: 0; }
+.tbl-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.ptable { overflow: auto; max-height: 540px; border: 1px solid var(--line); border-radius: 4px; }
+.ptable table { width: 100%; border-collapse: collapse; font-size: .84rem; font-variant-numeric: tabular-nums; }
+.ptable th { position: sticky; top: 0; background: var(--panel); z-index: 1; border-bottom: 1px solid var(--line); padding: 0; text-align: right; }
+.ptable th:nth-child(-n+2) { text-align: left; }
+.ptable th button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 7px 8px; cursor: pointer; font: 600 .75rem var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.ptable th button:hover, .ptable th button[aria-pressed="true"] { color: var(--fg); }
+.ptable th button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.ptable td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.ptable td:nth-child(-n+2) { text-align: left; }
+.ptable td:first-child { white-space: normal; min-width: 12em; }
+.ptable tbody tr { cursor: pointer; }
+.ptable tbody tr:hover { background: var(--bg); }
+.ptable tbody tr.sel { outline: 2px solid var(--focus); outline-offset: -2px; }
+.ptable tbody tr:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.toast { font-size: .8rem; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { #map path.p { transition: fill .25s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>PA-8 Precinct Returns</h1>
+      <div class="sub">Pennsylvania's 8th Congressional District · general elections by precinct</div>
+    </div>
+  </header>
+
+  <div class="controls viewrow">
+    <span class="lbl">Year</span>
+    <nav class="tabs" id="years" aria-label="Election year"></nav>
+  </div>
+  <div class="controls viewrow">
+    <span class="lbl">Race</span>
+    <nav class="tabs" id="tabs" aria-label="Race"></nav>
+  </div>
+  <div class="controls viewrow">
+    <span class="lbl">Data</span>
+    <nav class="tabs" id="views" aria-label="Data"></nav>
+  </div>
+  <div class="controls viewrow">
+    <span class="lbl">County</span>
+    <nav class="tabs" id="counties" aria-label="County"></nav>
+  </div>
+  <div class="controls viewrow">
+    <span class="lbl">Senate Districts</span>
+    <nav class="tabs" id="senate" aria-label="State Senate district"></nav>
+  </div>
+  <div class="controls viewrow">
+    <span class="lbl">House Districts</span>
+    <nav class="tabs" id="housed" aria-label="State House district"></nav>
+  </div>
+  <div class="controls viewrow">
+    <span class="lbl">Display</span>
+    <nav class="tabs" id="display" aria-label="Display"></nav>
+  </div>
+
+  <div class="board">
+    <div class="mapbox">
+      <div class="mapbar">
+        <div class="searchbox">
+          <input id="search" type="search" placeholder="Find a precinct or town…" autocomplete="off" aria-label="Find a precinct or town" aria-controls="sresults">
+          <ul id="sresults" class="sresults" role="listbox" hidden></ul>
+        </div>
+        <div class="share">
+          <button type="button" class="smallbtn" id="copylink">Copy link</button>
+          <code id="viewcode" title="Add this to the page's address to open this exact view"></code>
+          <span class="toast" id="linktoast" hidden></span>
+        </div>
+      </div>
+      <div class="maps" id="maps">
+        <figure class="mapfig">
+          <figcaption id="cap1" hidden></figcaption>
+          <svg id="map" role="img" aria-label="Precinct map of Pennsylvania's 8th Congressional District"></svg>
+        </figure>
+        <figure class="mapfig" id="fig2" hidden>
+          <figcaption id="cap2"></figcaption>
+          <svg id="map2" aria-hidden="true"></svg>
+        </figure>
+      </div>
+      <div class="zoomtoast" id="zoomtoast" hidden>Hold Ctrl (⌘ on Mac) and scroll to zoom</div>
+      <div class="zoomctl" role="group" aria-label="Map zoom">
+        <button type="button" id="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
+        <button type="button" id="zoom-out" aria-label="Zoom out" title="Zoom out">−</button>
+        <button type="button" id="zoom-reset" aria-label="Reset zoom" title="Reset zoom">Reset</button>
+      </div>
+      <div class="tip" id="tip" hidden></div>
+      <div class="legend" id="legend"></div>
+      <div class="zoomhint">Ctrl + scroll (⌘ + scroll on Mac), pinch, double-click or + / − to zoom; drag to move around.</div>
+    </div>
+    <div class="side">
+      <section class="card" id="totals"></section>
+      <section class="card" id="detail"></section>
+    </div>
+  </div>
+
+  <section class="card" id="tablecard">
+    <div class="tbl-head">
+      <div>
+        <p class="eyebrow" id="tbl-eyebrow"></p>
+        <h2 id="tbl-title">Precincts</h2>
+      </div>
+      <div class="tbl-actions">
+        <button type="button" class="smallbtn" id="csv-copy">Copy CSV</button>
+        <button type="button" class="smallbtn" id="csv-dl">Download CSV</button>
+        <span class="toast" id="csvtoast" hidden></span>
+      </div>
+    </div>
+    <div class="ptable"><table id="ptable"></table></div>
+    <p class="hint">Click a column heading to sort; click again to reverse. Click a row to find it on the map. Margins are positive for Democrats (D+) and negative for Republicans (R+) in the CSV.</p>
+  </section>
+
+  <footer id="sources"></footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-server@3.0.1/dist/topojson-server.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<script>
+const DATA = /*DATA*/null;
+
+// Counties in PA-8 (2022 map). Monroe is split; only its PA-8 precincts belong here.
+const DISTRICT_COUNTIES = ["Lackawanna", "Luzerne", "Monroe", "Pike", "Wayne"];
+const YEARS = ["2022", "2024", "2026"];
+const SOURCES = {
+  "2026": {
+    Lackawanna: "Lackawanna County Summary Results Report by precinct (G26.PCT12), unofficial, 11/03/2026 10:02 PM",
+    Wayne: "Wayne County Statement of Votes Cast by Precinct, unofficial, 11/03/2026 10:30 PM (35 of 35 precincts reported)",
+    Pike: "Pike County precinct detail workbook (detail.xlsx), unofficial, exported 11/03/2026 10:13 PM",
+    Luzerne: "Luzerne County precinct detail workbook (detail.xlsx), unofficial, exported 11/03/2026 11:39 PM; the 159 precincts that voted in the PA-8 race",
+    Monroe: "Monroe County Election Results site (agencies2.monroecountypa.gov/ElectionResults), results by district for each contest, unofficial, last updated 11/03/2026 11:04 PM; the 52 precincts that voted in the PA-8 race",
+  },
+  "2024": {
+    "All counties": "Pennsylvania Department of State precinct election returns, 2024 General (certified; extracted January 10, 2025), joined to the 2026 precincts by state precinct code. Turnout uses votes for President in place of ballots cast",
+  },
+};
+// 2026 race -> the 2024 race it is compared with in "Change since 2024"
+SOURCES["2022"] = {
+  "All counties": "Pennsylvania Department of State precinct election returns and precinct registration, 2022 General, joined to the 2026 precincts by state precinct code. Turnout uses votes for Governor in place of ballots cast. Matamoras and Tunkhannock use whole-municipality totals, and Middle Smithfield West and East use the township's 2022 West and East precincts, because their precincts were renumbered after 2022",
+};
+// 2026 race -> the past race it is compared with in "Change since …"
+const COMPARE = {
+  "2024": { cong: { id: "cong", label: "2024 U.S. House (Cartwright vs. Bresnahan)" }, gov: { id: "pres", label: "2024 President" } },
+  "2022": { cong: { id: "cong", label: "2022 U.S. House (Cartwright vs. Bognet)" }, gov: { id: "gov", label: "2022 Governor (Shapiro vs. Mastriano)" } },
+};
+const CMP_YEARS = ["2022", "2024"];
+
+const CONTESTS = [
+  { id: "pres", label: "President", title: "President", match: k => k.startsWith("PRESIDENT") },
+  { id: "ussen", label: "U.S. Senate", title: "U.S. Senate", match: k => k.startsWith("UNITED STATES SENATOR") },
+  { id: "gov", label: "Governor", title: "Governor & Lt. Governor", match: k => k.startsWith("GOVERNOR") },
+  { id: "att", label: "Attorney General", title: "Attorney General", match: k => k.startsWith("ATTORNEY GENERAL") },
+  { id: "aud", label: "Auditor General", title: "Auditor General", match: k => k.startsWith("AUDITOR GENERAL") },
+  { id: "tre", label: "Treasurer", title: "State Treasurer", match: k => k.startsWith("STATE TREASURER") },
+  { id: "cong", label: "U.S. House PA-8", title: "U.S. House, 8th District", match: k => k.startsWith("REPRESENTATIVE IN CONGRESS") },
+  { id: "sen", label: "State Senate", title: "State Senate", match: k => k.startsWith("SENATOR IN THE GENERAL ASSEMBLY"), districts: true },
+  { id: "house", label: "State House", title: "State House", match: k => k.startsWith("REPRESENTATIVE IN THE GENERAL ASSEMBLY"), districts: true },
+  { id: "turnout", label: "Turnout", title: "Voter Turnout", turnout: true },
+];
+
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = d3.format(","), pct = v => (v * 100).toFixed(1) + "%";
+const MARGIN_STEPS = [0, 10, 20, 30, 40];       // percentage-point margin bins
+const SHIFT_STEPS = [0, 5, 10, 20, 30];         // vote margin minus registration margin, in points
+const TURNOUT_STEPS = [0.45, 0.55, 0.62, 0.68, 0.74];
+const VIEWS = [
+  { id: "votes", label: "Vote margin" },
+  { id: "reg", label: "Party registration" },
+  { id: "shift", label: "Vote vs. registration" },
+  { id: "swing2022", label: "Change since 2022" },
+  { id: "swing2024", label: "Change since 2024" },
+  { id: "turnchg", label: "Turnout change since 2022" },
+];
+// Turnout used for turnout change: votes in the top race over everyone on the state rolls, the same measure in
+// every year (so Monroe, which publishes no ballot counts, is included)
+const TOP_KEY = { "2026": "GOVERNOR", "2022": "GOVERNOR", "2024": "PRESIDENT" };
+const TURNCHG_STEPS = [0, 2.5, 5, 10, 15];
+const REG_SOURCE = "Pennsylvania Department of State precinct voter registration files: 2026 General Primary rolls (extracted June 11, 2026) for 2026, and 2024 General rolls for 2024";
+const regLabel = () => year === "2026" ? "May 2026 rolls" : `Nov ${year} rolls`;
+const TOP_RACE = { "2024": "President", "2022": "Governor" };   // stands in for ballots cast in past years
+
+// Two-party margins in points, positive = Democratic
+const twoParty = (d, r) => d + r ? (d - r) / (d + r) * 100 : null;
+const contested = (d, r) => d && r ? twoParty(d, r) : null;   // unopposed races say nothing about registration
+const regMargin = p => p.pr ? twoParty(p.pr.D, p.pr.R) : null;
+const fmtM = m => `${m >= 0 ? "D" : "R"}+${Math.abs(m).toFixed(1)}`;
+const fmtShift = s => `${s >= 0 ? "Dem" : "Rep"} ran ${Math.abs(s).toFixed(1)} pts ${Math.abs(s) < 0.05 ? "even with" : "ahead of"} registration`;
+const partisan = c => !c.yesno && !c.turnout;
+
+// Labels like "DEM SHAPIRO / DAVIS" -> party + title-cased name
+function splitCand(label) {
+  const m = label.match(/^([A-Z]{3}) (.+)$/);
+  const party = m ? m[1] : null, raw = m ? m[2] : label;
+  const name = raw === "Write-In Totals" ? "Write-ins" :
+    raw.toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase()).replace(/\bJr\b/, "Jr.").replace(/\bO Brien\b/, "O'Brien");
+  return { party, name };
+}
+const partyColor = p => p === "DEM" ? css("--dem") : p === "REP" ? css("--rep") : css("--oth");
+const sumParty = (r, pre) => Object.entries(r).filter(([n]) => n.startsWith(pre)).reduce((s, [, v]) => s + v, 0);
+
+const feats = DATA.features;
+// Each year keeps its own registration and turnout; applyYear() swaps them onto the precinct's p.reg/p.ballots/p.mail/p.pr
+feats.forEach(f => {
+  const p = f.properties;
+  p._2026 = { reg: p.reg, ballots: p.ballots, mail: p.mail, pr: p.pr };
+  Object.entries(p.past || {}).forEach(([yr, t]) => { p["_" + yr] = { reg: t.reg, ballots: t.ballots, mail: null, pr: t.pr }; });
+});
+function applyYear() {
+  const set = p => Object.assign(p, p["_" + year] || { reg: null, ballots: null, mail: null, pr: null });
+  feats.forEach(f => set(f.properties));
+  if (typeof muniUnits !== "undefined") muniUnits.forEach(f => set(f.properties));
+}
+const loadedCounties = [...new Set(feats.map(f => f.properties.county))];
+const availableYears = YEARS.filter(y => feats.some(f => f.properties.y[y]));
+
+// Planar projection: lon scaled by cos(lat) so the district keeps its shape; avoids spherical winding issues
+const K = Math.cos(41.3 * Math.PI / 180);
+function reproj(g) {
+  const ring = r => r.map(([x, y]) => [x * K, y]);
+  return g.type === "Polygon" ? { type: g.type, coordinates: g.coordinates.map(ring) }
+    : { type: g.type, coordinates: g.coordinates.map(p => p.map(ring)) };
+}
+const planar = { type: "FeatureCollection", features: feats.map(f => ({ ...f, geometry: reproj(f.geometry) })) };
+const topo = topojson.topology({ p: planar });
+const proj = d3.geoIdentity().reflectY(true).fitSize([800, 900], planar);
+const path = d3.geoPath(proj);
+const svg = d3.select("#map");
+// viewBox [x, y, w, h] around a set of features, with a small margin
+function boxOf(fc) {
+  const [[x0, y0], [x1, y1]] = path.bounds(fc), pad = Math.max(x1 - x0, y1 - y0) * 0.03 + 2;
+  return [x0 - pad, y0 - pad, x1 - x0 + 2 * pad, y1 - y0 + 2 * pad];
+}
+const fullBox = boxOf(planar);
+let viewBox = fullBox;
+svg.attr("viewBox", fullBox.join(" "));
+// gZ carries the zoom/pan transform; everything drawn on the map sits inside it
+const gZ = svg.append("g");
+const gP = gZ.append("g"), gM = gZ.append("g"), gD = gZ.append("g"), gL = gZ.append("g");
+
+gM.append("path").attr("class", "muni")
+  .attr("d", path(topojson.mesh(topo, topo.objects.p, (a, b) => a !== b && (a.properties.muni !== b.properties.muni || a.properties.county !== b.properties.county))));
+gM.append("path").attr("class", "county")
+  .attr("d", path(topojson.mesh(topo, topo.objects.p, (a, b) => a === b || a.properties.county !== b.properties.county)));
+const distPath = gD.append("path").attr("class", "dist");
+loadedCounties.forEach(c => {
+  const merged = topojson.merge(topo, topo.objects.p.geometries.filter(g => g.properties.county === c));
+  const [x, y] = path.centroid(merged);
+  gL.append("text").attr("class", "clabel").attr("data-county", c).attr("x", x).attr("y", y).attr("text-anchor", "middle").text(c);
+});
+// ---------- Municipality view: precincts merged into towns (votes, registration and turnout added up) ----------
+function addInto(dst, src) { Object.entries(src || {}).forEach(([k, v]) => { dst[k] = (dst[k] || 0) + v; }); }
+const muniUnits = [...d3.group(d3.range(planar.features.length), i => planar.features[i].properties.county + "|" + planar.features[i].properties.muni)]
+  .map(([, idx]) => {
+    const ps = idx.map(i => planar.features[i].properties);
+    const props = { name: ps[0].muni, county: ps[0].county, muni: ps[0].muni, isMuni: true, nPrecincts: ps.length,
+      sd: [...new Set(ps.map(q => q.sd))], hd: [...new Set(ps.flatMap(q => q.hd || []))], y: {}, past: {},
+      note: ps.length > 1 ? `${ps.length} precincts added together.` : ps[0].note };
+    YEARS.forEach(yr => {
+      if (!ps.some(q => q.y[yr])) return;
+      props.y[yr] = {};
+      ps.forEach(q => Object.entries(q.y[yr] || {}).forEach(([c, r]) => { props.y[yr][c] = props.y[yr][c] || {}; addInto(props.y[yr][c], r); }));
+      const parts = ps.map(q => q["_" + yr]).filter(Boolean);
+      if (!parts.length) return;
+      const tot = k => parts.length === ps.length && parts.every(t => t[k] != null) ? d3.sum(parts, t => t[k]) : null;
+      const pr = { D: 0, R: 0, L: 0, O: 0 };
+      parts.forEach(t => addInto(pr, t.pr));
+      props["_" + yr] = { reg: tot("reg"), ballots: tot("ballots"), mail: tot("mail"), pr };
+      if (yr !== "2026") props.past[yr] = { pr };
+    });
+    Object.assign(props, props._2026);
+    return { type: "Feature", properties: props, geometry: topojson.merge(topo, idx.map(i => topo.objects.p.geometries[i])) };
+  })
+  .sort((a, b) => a.properties.name.localeCompare(b.properties.name));
+let unitMode = "precinct", units = planar.features, bubblesOn = false, sideYear = null;
+const unitKey = f => (f.properties.isMuni ? "m|" : "p|") + f.properties.county + "|" + f.properties.name;
+const centroids = new WeakMap();
+const centroidOf = f => { if (!centroids.has(f)) centroids.set(f, path.centroid(f)); return centroids.get(f); };
+const gB = gZ.insert("g", () => gL.node()).attr("class", "bubbles");
+
+// Second map for side-by-side years: display only, mirrors the main map's zoom and county view
+const svg2 = d3.select("#map2").attr("viewBox", fullBox.join(" "));
+const gZ2 = svg2.append("g"), gP2 = gZ2.append("g"), gM2 = gZ2.append("g"), gB2 = gZ2.append("g");
+gM.selectAll("path").each(function () { gM2.append("path").attr("class", this.getAttribute("class")).attr("d", this.getAttribute("d")); });
+
+// Each precinct's State Senate district (p.sd) comes from the state registration file; only districts
+// with a 2026 Senate race get a button (the 27th and 29th were not on the ballot)
+const senateDistricts = [...new Set(feats.filter(f => Object.keys(f.properties.y["2026"] || {})
+  .some(k => k.startsWith("SENATOR IN THE GENERAL ASSEMBLY"))).map(f => f.properties.sd))].sort((a, b) => a - b);
+// State House districts (p.hd, a list because a combined precinct can span two) from the same file
+const houseDistricts = [...new Set(feats.flatMap(f => f.properties.hd || []))].sort((a, b) => a - b);
+
+// Area filter: "All" shows the whole district; a county name, "SD:<n>" (State Senate district) or "HD:<n>"
+// (State House district) zooms the map to that area, fades everything else and scopes the side panel
+let countyFilter = "All";
+const isSD = () => countyFilter.startsWith("SD:");
+const isHD = () => countyFilter.startsWith("HD:");
+// districts may be one number (a precinct) or a list (a municipality that spans more than one)
+const has = (v, n) => Array.isArray(v) ? v.includes(n) : v === n;
+const inArea = (p, a) => a === "All" || (a.startsWith("SD:") ? has(p.sd, +a.slice(3))
+  : a.startsWith("HD:") ? has(p.hd || [], +a.slice(3)) : p.county === a);
+const inScope = f => inArea(f.properties, countyFilter);
+const areaBox = Object.fromEntries([
+  ...loadedCounties, ...senateDistricts.map(d => "SD:" + d), ...houseDistricts.map(d => "HD:" + d),
+].map(a => [a, boxOf({ type: "FeatureCollection", features: planar.features.filter(f => inArea(f.properties, a)) })]));
+const scopeLabel = scope => isSD() ? `${ordinal(countyFilter.slice(3))} Senate District · ${scope.join(" + ")}`
+  : isHD() ? `${ordinal(countyFilter.slice(3))} House District · ${scope.join(" + ")}` : scope.join(" + ");
+// Free zoom and pan (wheel, pinch, drag, double-click, or the +/− buttons) on top of the county view
+let boxK = 1, zoomK = 1;
+// labels are in map units, so shrink them as the map zooms in
+function sizeLabels() {
+  const k = boxK / zoomK;
+  gL.selectAll("text").style("font-size", `${15 * k}px`).style("stroke-width", `${4 * k}px`);
+  sizeBubbles();
+}
+// bubbles keep the same on-screen size as the map zooms
+function sizeBubbles() {
+  const k = boxK / zoomK;
+  [gB, gB2].forEach(g => g.selectAll("circle").attr("r", function () { return +this.dataset.r * k; }));
+}
+// Plain scrolling must keep scrolling the page: the wheel zooms only with Ctrl/⌘ (trackpad pinch sends ctrlKey),
+// and on touch screens one finger scrolls the page while two fingers pinch-zoom the map.
+const zoom = d3.zoom().scaleExtent([0.5, 24])
+  // d3 multiplies Ctrl+wheel by 10 (meant for trackpad pinches); only small pinch deltas get that boost,
+  // so a mouse-wheel click zooms about 1.2x
+  .wheelDelta(ev => -ev.deltaY * (ev.deltaMode === 1 ? 0.05 : ev.deltaMode ? 1 : 0.002) * (Math.abs(ev.deltaY) < 50 ? 10 : 1))
+  .filter(ev => ev.type === "wheel" ? ev.ctrlKey || ev.metaKey
+    : ev.type.startsWith("touch") ? ev.touches.length > 1
+    : !ev.button)
+  .on("zoom", ev => { gZ.attr("transform", ev.transform); gZ2.attr("transform", ev.transform); zoomK = ev.transform.k; sizeLabels(); tip.hidden = true; });
+svg.call(zoom);
+let hintTimer;
+svg.on("wheel.hint", ev => {
+  if (ev.ctrlKey || ev.metaKey) return;
+  const h = document.getElementById("zoomtoast");
+  h.hidden = false;
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => { h.hidden = true; }, 1400);
+});
+function setZoomBounds(box) {
+  const ext = [[box[0], box[1]], [box[0] + box[2], box[1] + box[3]]];
+  zoom.extent(ext).translateExtent(ext);
+}
+function zoomBy(f) {
+  const t = svg.transition().duration(matchMedia("(prefers-reduced-motion: reduce)").matches || document.hidden ? 0 : 250);
+  t.call(zoom.scaleBy, f);
+}
+function zoomReset(animate) {
+  (animate && !document.hidden ? svg.transition().duration(300) : svg).call(zoom.transform, d3.zoomIdentity);
+}
+
+function applyCounty(animate) {
+  const target = countyFilter === "All" ? fullBox : areaBox[countyFilter];
+  boxK = target[2] / fullBox[2];
+  setZoomBounds(target);
+  zoomReset(false);
+  gL.selectAll("text").classed("out", function () { return countyFilter !== "All" && !feats.some(f => inScope(f) && f.properties.county === this.dataset.county); });
+  sizeLabels();
+  paths.classed("out", f => !inScope(f));
+  gP2.selectAll("path").classed("out", f => !inScope(f));
+  if (pinned && !inScope(pinned)) { pinned = null; paths.classed("sel", false); }
+  const from = viewBox;
+  viewBox = target;
+  if (!animate || document.hidden || matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    svg.attr("viewBox", target.join(" ")); svg2.attr("viewBox", target.join(" ")); return;
+  }
+  svg.transition().duration(450).attrTween("viewBox", () => t => {
+    const vb = d3.interpolateArray(from, target)(t).join(" ");
+    svg2.attr("viewBox", vb);
+    return vb;
+  });
+}
+
+let year = availableYears[availableYears.length - 1], current = CONTESTS.find(c => c.id === "cong"), pinned = null, view = "votes";
+
+const res = p => p.y[year];
+function contestKey(p, c) { const r = res(p); return r ? Object.keys(r).find(c.match) : undefined; }
+const yearHas = c => c.turnout ? true : feats.some(f => contestKey(f.properties, c));
+function voteMargin(p, c) {
+  const k = contestKey(p, c);
+  if (!k) return null;
+  const r = res(p)[k];
+  return contested(sumParty(r, "DEM "), sumParty(r, "REP "));
+}
+// D and R votes for a race in a given year (any year, not just the one on screen)
+function dvr(p, c, yr) {
+  const r = p.y[yr];
+  const k = r && Object.keys(r).find(c.match);
+  return k ? { d: sumParty(r[k], "DEM "), r: sumParty(r[k], "REP ") } : null;
+}
+const isSwing = () => view.startsWith("swing");
+const viewCmpYear = () => isSwing() ? view.slice(5) : "2024";
+// The past race a 2026 race is compared with, or null (only 2026 U.S. House and Governor have one)
+function compareTo(cy = viewCmpYear()) {
+  const c = year === "2026" && COMPARE[cy] && COMPARE[cy][current.id];
+  return c ? { ...c, year: cy, contest: CONTESTS.find(x => x.id === c.id) } : null;
+}
+// 2026 margin minus the comparison race's margin, in points (positive = shift toward D)
+function swingOf(p, cy) {
+  const cmp = compareTo(cy);
+  if (!cmp) return null;
+  const a = dvr(p, current, "2026"), b = dvr(p, cmp.contest, cmp.year);
+  if (!a || !b) return null;
+  const m6 = contested(a.d, a.r), m4 = contested(b.d, b.r);
+  return m6 == null || m4 == null ? null : m6 - m4;
+}
+// Turnout in a year: votes in that year's top race over everyone on that year's state rolls
+function topTurnout(p, yr) {
+  const r = p.y[yr], k = r && Object.keys(r).find(k => k.startsWith(TOP_KEY[yr]));
+  const pr = yr === "2026" ? (p._2026 && p._2026.pr) : p.past && p.past[yr] && p.past[yr].pr;
+  const n = pr ? pr.D + pr.R + pr.L + pr.O : 0;
+  return k && n ? d3.sum(Object.values(r[k])) / n : null;
+}
+// 2026 turnout minus 2022 turnout, in points
+const turnChange = p => { const a = topTurnout(p, "2026"), b = topTurnout(p, "2022"); return a == null || b == null ? null : (a - b) * 100; };
+// Diverging ramp: positive -> Dem shades, negative -> Rep shades
+function ramp(m, steps) {
+  const i = Math.min(4, d3.bisectRight(steps, Math.abs(m)) - 1);
+  return css(`${m >= 0 ? "--d" : "--r"}${i + 1}`);
+}
+
+// Fill color for a precinct under the current year + contest + view
+function shade(p, c) {
+  if (view === "reg") { const m = regMargin(p); return m == null ? css("--line") : ramp(m, MARGIN_STEPS); }
+  if (view === "turnchg") {
+    const c = turnChange(p);
+    if (c == null) return css("--line");
+    const i = Math.min(4, d3.bisectRight(TURNCHG_STEPS, Math.abs(c)) - 1);
+    return css(`${c >= 0 ? "--y" : "--t"}${i + 1}`);
+  }
+  if (!res(p)) return css("--line");
+  if (isSwing() && compareTo()) { const s = swingOf(p); return s == null ? css("--line") : ramp(s, SHIFT_STEPS); }
+  if (view === "shift" && partisan(c)) {
+    const v = voteMargin(p, c), r = regMargin(p);
+    return v == null || r == null ? css("--line") : ramp(v - r, SHIFT_STEPS);
+  }
+  if (c.turnout) {
+    if (!p.reg) return css("--line");
+    const i = d3.bisectRight(TURNOUT_STEPS, p.ballots / p.reg) - 1;
+    return css(`--t${Math.max(0, i) + 1}`);
+  }
+  const k = contestKey(p, c);
+  if (!k) return css("--line");
+  const r = res(p)[k];
+  const [a, b, aVar, bVar] = c.yesno ? [r.YES || 0, r.NO || 0, "--y", "--n"] : [sumParty(r, "DEM "), sumParty(r, "REP "), "--d", "--r"];
+  if (a + b === 0) return css("--line");
+  const m = (a - b) / (a + b) * 100;
+  const steps = c.yesno && m < 0 ? 3 : 5;
+  const i = Math.min(steps - 1, d3.bisectRight(MARGIN_STEPS, Math.abs(m)) - 1);
+  return css(`${m >= 0 ? aVar : bVar}${i + 1}`);
+}
+
+let paths;
+function drawUnits() {
+  paths = gP.selectAll("path.p").data(units, unitKey).join("path").attr("class", "p").attr("d", path)
+    .on("mousemove", (ev, f) => showTip(ev, f))
+    .on("mouseleave", () => { tip.hidden = true; if (!pinned) renderDetail(null); })
+    .on("mouseenter", (ev, f) => { if (!pinned) renderDetail(f.properties); })
+    .on("click", (ev, f) => pin(pinned === f ? null : f));
+  gP2.selectAll("path.p").data(units, unitKey).join("path").attr("class", "p").attr("d", path);
+}
+function pin(f) {
+  pinned = f;
+  paths.classed("sel", d => d === pinned);
+  if (pinned) paths.filter(d => d === pinned).raise();
+  renderDetail(pinned ? pinned.properties : null);
+  document.querySelectorAll("#ptable tbody tr").forEach(tr => tr.classList.toggle("sel", tableState.rows[+tr.dataset.i] && tableState.rows[+tr.dataset.i].f === pinned));
+}
+drawUnits();
+// Clicking away from a pinned precinct clears it; clicks on another precinct, the detail panel, the table,
+// the search box or the zoom buttons keep their own behavior
+document.addEventListener("click", ev => {
+  if (!pinned || ev.target.closest("#map path.p, #detail, #ptable tbody tr, .searchbox, .zoomctl")) return;
+  pin(null);
+});
+
+const tip = document.getElementById("tip");
+function showTip(ev, f) {
+  if (matchMedia("(hover: none)").matches) return;
+  const p = f.properties, box = document.querySelector(".mapbox").getBoundingClientRect();
+  let line = "No results loaded for " + year;
+  const rm = regMargin(p);
+  if (view === "turnchg") {
+    const a = topTurnout(p, "2026"), b = topTurnout(p, "2022");
+    line = a == null || b == null ? "No turnout comparison" : `Turnout 2022 ${pct(b)} → 2026 ${pct(a)} (${a >= b ? "+" : "−"}${Math.abs((a - b) * 100).toFixed(1)} pts)`;
+  }
+  else if (view === "reg") line = p.pr ? `Registration ${fmtM(rm)}<br>D ${fmt(p.pr.D)} · R ${fmt(p.pr.R)} · Other ${fmt(p.pr.L + p.pr.O)}` : "No registration data";
+  else if (isSwing() && compareTo() && res(p)) {
+    const cmp = compareTo(), a = dvr(p, current, "2026"), b = dvr(p, cmp.contest, cmp.year), s = swingOf(p);
+    line = s == null ? "No comparison for this precinct" :
+      `${cmp.year} ${fmtM(contested(b.d, b.r))} → 2026 ${fmtM(contested(a.d, a.r))} · shift ${fmtM(s)}<br>D votes ${fmt(b.d)} → ${fmt(a.d)} · R votes ${fmt(b.r)} → ${fmt(a.r)}`;
+  }
+  else if (view === "shift" && partisan(current) && res(p)) {
+    const v = voteMargin(p, current);
+    line = v == null ? (contestKey(p, current) ? "Unopposed race, no comparison" : "Not on this precinct's ballot") : `Vote ${fmtM(v)} · Registration ${fmtM(rm)}<br>${fmtShift(v - rm)}`;
+  }
+  else if (res(p) && current.turnout) line = p.reg ? `Turnout ${pct(p.ballots / p.reg)} · ${fmt(p.ballots)} of ${fmt(p.reg)}` : "Precinct turnout not published";
+  else if (res(p)) {
+    const k = contestKey(p, current);
+    if (!k) line = "Not on this precinct's ballot";
+    else {
+      const r = res(p)[k], tot = d3.sum(Object.values(r));
+      line = Object.entries(r).filter(([n]) => n !== "Write-In Totals").sort((x, y) => y[1] - x[1])
+        .map(([n, v]) => `${splitCand(n).name} ${pct(v / tot)}`).join("<br>");
+    }
+  }
+  tip.innerHTML = `<b>${p.name}</b> · ${p.county}<br>${line}`;
+  tip.hidden = false;
+  const x = ev.clientX - box.left + 14, y = ev.clientY - box.top + 14;
+  tip.style.left = Math.min(x, box.width - tip.offsetWidth - 8) + "px";
+  tip.style.top = Math.min(y, box.height - tip.offsetHeight - 8) + "px";
+}
+
+function candRows(results, total) {
+  return Object.entries(results).sort((a, b) => (a[0] === "Write-In Totals") - (b[0] === "Write-In Totals") || b[1] - a[1])
+    .map(([n, v]) => {
+      const { party, name } = splitCand(n);
+      const col = n === "YES" ? css("--y4") : n === "NO" ? css("--n3") : partyColor(party);
+      const share = total ? v / total : 0;
+      return `<div class="cand"><span class="nm">${party ? `<b style="color:${col}">${party[0]}</b> ` : ""}${name}</span><span class="pc">${pct(share)}</span><span class="vt">${fmt(v)}</span><div class="bar"><i style="width:${share * 100}%;background:${col}"></i></div></div>`;
+    }).join("");
+}
+
+const ordinal = n => n + (/1[123]$/.test(n) ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n.slice(-1)] || "th");
+function prettyContest(k) {
+  return k.replace("REPRESENTATIVE IN THE GENERAL ASSEMBLY", "State House")
+    .replace("SENATOR IN THE GENERAL ASSEMBLY", "State Senate")
+    .replace("REPRESENTATIVE IN CONGRESS", "U.S. House")
+    .replace("GOVERNOR AND LIEUTENANT GOVERNOR", "Governor")
+    .replace("PRESIDENT OF THE UNITED STATES", "President")
+    .replace("UNITED STATES SENATOR", "U.S. Senate")
+    .replace("LACKAWANNA CO. HOME RULE CHARTER AMENDMENT", "Lackawanna Home Rule Charter")
+    .replace("SCOTT TOWNSHIP BALLOT QUESTION", "Scott Township Ballot Question")
+    .replace(/(\d+)(ST|ND|RD|TH) DISTRICT/, (m, n) => `${ordinal(n)} District`)
+    .replace(/^[A-Z][A-Z .]+$/, s => s.toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase()).replace(/\b(Ems|Twp)\b/g, w => w === "Ems" ? "EMS" : "Township"));
+}
+
+function aggregate(fs) {
+  const agg = {};
+  fs.forEach(f => Object.entries(res(f.properties)[contestKey(f.properties, current)]).forEach(([n, v]) => agg[n] = (agg[n] || 0) + v));
+  return agg;
+}
+
+const sumReg = fs => ["D", "R", "L", "O"].reduce((o, k) => (o[k] = d3.sum(fs, f => f.properties.pr ? f.properties.pr[k] : 0), o), {});
+function regRows(pr) {
+  const tot = pr.D + pr.R + pr.L + pr.O;
+  return candRows({ "DEM Democratic": pr.D, "REP Republican": pr.R, "LIB Libertarian": pr.L, "Other / no affiliation": pr.O }, tot);
+}
+const mcell = m => m == null ? `<td>Unopposed</td>` : `<td style="color:${m >= 0 ? css("--dem") : css("--rep")};font-weight:600">${fmtM(m)}</td>`;
+
+function renderTotals() {
+  const el = document.getElementById("totals");
+  const fs = feats.filter(f => res(f.properties) && inScope(f));
+  const scope = loadedCounties.filter(c => fs.some(f => f.properties.county === c));
+  let html;
+  if (view === "reg") {
+    const pr = sumReg(feats.filter(inScope));
+    html = `<p class="eyebrow">${regLabel()} · ${scopeLabel(scope)}</p><h2>Party Registration</h2>` + regRows(pr);
+    html += `<h3>By county</h3><table class="by"><tr><th>County</th><th>D</th><th>R</th><th>Other</th><th>Margin</th></tr>` + scope.map(c => {
+      const q = sumReg(feats.filter(f => f.properties.county === c)), t = q.D + q.R + q.L + q.O;
+      return `<tr><td>${c}</td><td>${pct(q.D / t)}</td><td>${pct(q.R / t)}</td><td>${pct((q.L + q.O) / t)}</td>${mcell(twoParty(q.D, q.R))}</tr>`;
+    }).join("") + `</table><p class="hint">Margin is D vs. R share of the two-party registration. Other combines Libertarian, other parties and no affiliation.</p>`;
+    el.innerHTML = html;
+    return;
+  }
+  if (view === "turnchg") {
+    const fa = feats.filter(inScope);
+    const rate = (fs, yr) => {
+      let v = 0, n = 0;
+      fs.forEach(f => {
+        const q = f.properties, r = q.y[yr], k = r && Object.keys(r).find(k => k.startsWith(TOP_KEY[yr]));
+        const pr = yr === "2026" ? q._2026.pr : q.past && q.past[yr] && q.past[yr].pr;
+        if (k && pr) { v += d3.sum(Object.values(r[k])); n += pr.D + pr.R + pr.L + pr.O; }
+      });
+      return n ? v / n : null;
+    };
+    const t22 = rate(fa, "2022"), t26 = rate(fa, "2026"), sgn = d => `${d >= 0 ? "+" : "−"}${Math.abs(d * 100).toFixed(1)}`;
+    html = `<p class="eyebrow">2022 → 2026 · ${scopeLabel(scope)}</p><h2>Turnout Change</h2>
+      <div class="stats"><div><b>${pct(t22)}</b><span>2022</span></div><div><b>${pct(t26)}</b><span>2026</span></div><div><b>${sgn(t26 - t22)}</b><span>points</span></div></div>
+      <h3>By county</h3><table class="by"><tr><th>County</th><th>2022</th><th>2026</th><th>Change</th></tr>` + scope.map(c => {
+        const cf = fa.filter(f => f.properties.county === c), a = rate(cf, "2022"), b = rate(cf, "2026");
+        return `<tr><td>${c}</td><td>${pct(a)}</td><td>${pct(b)}</td><td style="font-weight:600">${sgn(b - a)}</td></tr>`;
+      }).join("") + `</table><p class="hint">Turnout here is votes for Governor divided by everyone on the state's registration rolls, the same measure in both years, so Monroe is included. It runs a little lower than ballots-cast turnout.</p>`;
+    el.innerHTML = html;
+    return;
+  }
+  html = `<p class="eyebrow">${year} · ${scopeLabel(scope)}</p><h2>${current.title}</h2>`;
+  if (isSwing() && compareTo()) {
+    const cmp = compareTo(), cy = cmp.year;
+    const on = fs.filter(f => swingOf(f.properties) != null);
+    const tally = g => {
+      const t = { d6: 0, r6: 0, d4: 0, r4: 0 };
+      g.forEach(f => { const a = dvr(f.properties, current, "2026"), b = dvr(f.properties, cmp.contest, cy); t.d6 += a.d; t.r6 += a.r; t.d4 += b.d; t.r4 += b.r; });
+      return t;
+    };
+    const t = tally(on), m4 = twoParty(t.d4, t.r4), m6 = twoParty(t.d6, t.r6);
+    html += `<p class="hint" style="margin-top:0">Compared with ${cmp.label}.</p>
+      <div class="stats"><div><b>${fmtM(m4)}</b><span>${cy}</span></div><div><b>${fmtM(m6)}</b><span>2026</span></div><div><b>${fmtM(m6 - m4)}</b><span>shift</span></div></div>
+      <table class="by"><tr><th>Votes</th><th>${cy}</th><th>2026</th><th>Kept</th></tr>
+      <tr><td>Democratic</td><td>${fmt(t.d4)}</td><td>${fmt(t.d6)}</td><td>${pct(t.d6 / t.d4)}</td></tr>
+      <tr><td>Republican</td><td>${fmt(t.r4)}</td><td>${fmt(t.r6)}</td><td>${pct(t.r6 / t.r4)}</td></tr></table>`;
+    html += `<h3>By county</h3><table class="by"><tr><th>County</th><th>${cy}</th><th>2026</th><th>Shift</th><th>D kept</th><th>R kept</th></tr>` + scope.map(c => {
+      const q = tally(on.filter(f => f.properties.county === c)), a = twoParty(q.d4, q.r4), b = twoParty(q.d6, q.r6);
+      return `<tr><td>${c}</td>${mcell(a)}${mcell(b)}${mcell(b - a)}<td>${pct(q.d6 / q.d4)}</td><td>${pct(q.r6 / q.r4)}</td></tr>`;
+    }).join("") + `</table><p class="hint">"Kept" is 2026 votes as a share of the same party's ${cy} votes. ${cy === "2024"
+      ? "Midterms always draw fewer voters than presidential years; the question is which side lost more."
+      : "2022 was also a midterm, so turnout is more directly comparable."}</p>`;
+    el.innerHTML = html;
+    return;
+  }
+  if (view === "shift" && partisan(current)) {
+    const on = fs.filter(f => contestKey(f.properties, current));
+    const byGroup = current.districts ? d3.group(on, f => contestKey(f.properties, current)) : d3.group(on, f => f.properties.county);
+    // district-wide comparison leaves out uncontested races (e.g. an unopposed State House seat)
+    const cont = on.filter(f => voteMargin(f.properties, current) != null);
+    const all = aggregate(cont), pr = sumReg(cont);
+    const v = twoParty(sumParty(all, "DEM "), sumParty(all, "REP ")), r = twoParty(pr.D, pr.R);
+    html += `<div class="stats"><div><b>${fmtM(v)}</b><span>vote</span></div><div><b>${fmtM(r)}</b><span>registration</span></div><div><b>${v - r >= 0 ? "D" : "R"} +${Math.abs(v - r).toFixed(1)}</b><span>ran ahead</span></div></div>`;
+    html += `<table class="by"><tr><th>${current.districts ? "District" : "County"}</th><th>Vote</th><th>Reg.</th><th>Shift</th></tr>` + [...byGroup.keys()].sort().map(k => {
+      const g = byGroup.get(k), a = aggregate(g), q = sumReg(g);
+      const gv = contested(sumParty(a, "DEM "), sumParty(a, "REP ")), gr = twoParty(q.D, q.R);
+      return `<tr><td>${current.districts ? prettyContest(k).replace(/^State (House|Senate) /, "") : k}</td>${mcell(gv)}${mcell(gr)}${mcell(gv == null ? null : gv - gr)}</tr>`;
+    }).join("") + `</table><p class="hint">Shift is the vote margin minus the registration margin. Blue means the Democrat ran ahead of Democratic registration; red means the Republican did.</p>`;
+    el.innerHTML = html;
+    return;
+  }
+  if (current.turnout) {
+    const ft = fs.filter(f => f.properties.reg), noTurnout = scope.filter(c => !ft.some(f => f.properties.county === c));
+    const reg = d3.sum(ft, f => f.properties.reg), bal = d3.sum(ft, f => f.properties.ballots), mail = d3.sum(ft, f => f.properties.mail);
+    html += `<div class="stats"><div><b>${pct(bal / reg)}</b><span>turnout</span></div><div><b>${fmt(bal)}</b><span>ballots cast</span></div><div><b>${fmt(reg)}</b><span>registered</span></div></div>`;
+    const hasMail = year === "2026";
+    html += `<table class="by"><tr><th>County</th><th>Turnout</th><th>Ballots</th>${hasMail ? "<th>Mail share</th>" : ""}</tr>` + scope.filter(c => !noTurnout.includes(c)).map(c => {
+      const cf = ft.filter(f => f.properties.county === c);
+      const r = d3.sum(cf, f => f.properties.reg), b = d3.sum(cf, f => f.properties.ballots), m = d3.sum(cf, f => f.properties.mail);
+      return `<tr><td>${c}</td><td>${pct(b / r)}</td><td>${fmt(b)}</td>${hasMail ? `<td>${pct(m / b)}</td>` : ""}</tr>`;
+    }).join("") + `</table>`;
+    if (!hasMail) html += `<p class="hint">${year} turnout counts votes for ${TOP_RACE[year]}, since the state file has no ballot totals. Registration is the state's ${year} general rolls.</p>`;
+    if (noTurnout.length) html += `<p class="hint">${noTurnout.join(", ")} does not publish registered voters or ballots by precinct, so it is left out of turnout and shown gray.</p>`;
+  } else {
+    const on = fs.filter(f => contestKey(f.properties, current));
+    const groups = d3.group(on, f => contestKey(f.properties, current));
+    const keys = [...groups.keys()].sort();
+    keys.forEach(k => {
+      const g = groups.get(k);
+      if (keys.length > 1) html += `<h3>${prettyContest(k)} · ${g.length} precincts</h3>`;
+      html += candRows(aggregate(g), d3.sum(Object.values(aggregate(g))));
+    });
+    if (!keys.length) html += `<p class="hint">No ${current.title} race on the ${year} ballot in this area.</p>`;
+    if (!current.yesno && !current.districts) {
+      html += `<h3>By county</h3><table class="by"><tr><th>County</th><th>D</th><th>R</th><th>Margin</th></tr>` + scope.map(c => {
+        const a = aggregate(on.filter(f => f.properties.county === c)), tot = d3.sum(Object.values(a));
+        const d = sumParty(a, "DEM ") / tot, r = sumParty(a, "REP ") / tot, m = (d - r) * 100;
+        return `<tr><td>${c}</td><td>${pct(d)}</td><td>${pct(r)}</td><td style="color:${m >= 0 ? css("--dem") : css("--rep")};font-weight:600">${m >= 0 ? "D" : "R"}+${Math.abs(m).toFixed(1)}</td></tr>`;
+      }).join("") + `</table>`;
+    }
+    if (current.districts) html += `<p class="hint">Only the parts of these districts inside the loaded counties. Dashed lines on the map divide the districts.</p>`;
+  }
+  const missing = countyFilter === "All" ? DISTRICT_COUNTIES.filter(c => !scope.includes(c)) : [];
+  if (missing.length) html += `<p class="hint">Totals cover the loaded counties only. Not yet loaded: ${missing.join(", ")}.</p>`;
+  el.innerHTML = html;
+}
+
+function renderDetail(p) {
+  const el = document.getElementById("detail");
+  if (!p) { el.innerHTML = `<p class="eyebrow">Precinct</p><p class="hint" style="margin:0">Hover or tap a precinct to see its full results. Click to pin it.</p>`; return; }
+  let html = `<p class="eyebrow">${p.county} County · ${year}${pinned ? " · pinned" : ""}</p><h2>${p.name}</h2>`;
+  if (!res(p)) { el.innerHTML = html + `<p class="hint">No ${year} results loaded for this precinct yet.</p>`; return; }
+  if (p.reg) html += `<div class="stats"><div><b>${pct(p.ballots / p.reg)}</b><span>turnout</span></div><div><b>${fmt(p.ballots)}</b><span>${TOP_RACE[year] ? `votes for ${TOP_RACE[year]}` : "ballots"}</span></div>${p.mail != null ? `<div><b>${fmt(p.mail)}</b><span>by mail</span></div>` : ""}</div>`;
+  if (p.note) html += `<p class="hint">${p.note}</p>`;
+  CMP_YEARS.forEach(cy => {
+    const cmp = compareTo(cy);
+    if (!cmp) return;
+    const a = dvr(p, current, "2026"), b = dvr(p, cmp.contest, cy), s = swingOf(p, cy);
+    if (s != null) html += `<p class="cmp">Since ${cmp.label}: ${fmtM(contested(b.d, b.r))} → ${fmtM(contested(a.d, a.r))}, shift <b>${fmtM(s)}</b>. D votes ${fmt(b.d)} → ${fmt(a.d)} (${pct(a.d / b.d)} kept), R votes ${fmt(b.r)} → ${fmt(a.r)} (${pct(a.r / b.r)} kept).</p>`;
+  });
+  const rm = regMargin(p);
+  Object.entries(res(p)).forEach(([k, r]) => {
+    html += `<h3>${prettyContest(k)}</h3>`;
+    const v = contested(sumParty(r, "DEM "), sumParty(r, "REP "));
+    if (v != null && rm != null) html += `<p class="cmp">Vote <b>${fmtM(v)}</b> vs. registration <b>${fmtM(rm)}</b> · ${fmtShift(v - rm)}</p>`;
+    html += candRows(r, d3.sum(Object.values(r)));
+  });
+  if (p.pr) html += `<h3>Party registration · ${regLabel()}</h3>` + regRows(p.pr);
+  el.innerHTML = html;
+}
+
+function renderLegend() {
+  const el = document.getElementById("legend");
+  const ramp = (prefix, n, labels) => `<div class="key"><div class="ramp">${d3.range(n).map(i => `<span style="background:${css(prefix + (i + 1))}"></span>`).join("")}</div><div class="ramp-labels">${labels.map(l => `<span>${l}</span>`).join("")}</div></div>`;
+  const ml = ["0", "10", "20", "30", "40+"];
+  if (view === "turnchg") el.innerHTML = `<span>Turnout down</span>` + ramp("--t", 5, ["0", "2.5", "5", "10", "15+"]) + `<span>Turnout up</span>` + ramp("--y", 5, ["0", "2.5", "5", "10", "15+"]) + `<span>points, 2026 vs. 2022 (Governor votes ÷ registered)</span>`;
+  else if (view === "reg") el.innerHTML = `<span>Dem registration edge</span>` + ramp("--d", 5, ml) + `<span>Rep registration edge</span>` + ramp("--r", 5, ml) + `<span>points (D vs. R share of two-party registration)</span>`;
+  else if (isSwing() && compareTo()) el.innerHTML = `<span>Shift toward D</span>` + ramp("--d", 5, ["0", "5", "10", "20", "30+"]) + `<span>Shift toward R</span>` + ramp("--r", 5, ["0", "5", "10", "20", "30+"]) + `<span>points of margin since ${compareTo().label}</span>`;
+  else if (view === "shift" && partisan(current)) el.innerHTML = `<span>Dem ran ahead</span>` + ramp("--d", 5, ["0", "5", "10", "20", "30+"]) + `<span>Rep ran ahead</span>` + ramp("--r", 5, ["0", "5", "10", "20", "30+"]) + `<span>points, vote margin minus registration margin</span>`;
+  else if (current.turnout) el.innerHTML = `<span>Turnout</span>` + ramp("--t", 5, ["<55", "55", "62", "68", "74+"]) + `<span>% of registered voters</span>`;
+  else if (current.yesno) el.innerHTML = `<span>Yes margin</span>` + ramp("--y", 5, ml) + `<span>No margin</span>` + ramp("--n", 3, ml.slice(0, 3)) + `<span>points</span>`;
+  else el.innerHTML = `<span>Dem margin</span>` + ramp("--d", 5, ml) + `<span>Rep margin</span>` + ramp("--r", 5, ml) + `<span>points (D vs. R share of two-party vote)</span>`;
+  if (bubblesOn) el.innerHTML += `<span>· Circle size = ${bubbleLabel()}</span>`;
+}
+
+// ---------- Vote bubbles: a circle per precinct (or town), sized by votes, colored like the map ----------
+function bubbleSize(p) {
+  if (view === "reg") return p.pr ? p.pr.D + p.pr.R + p.pr.L + p.pr.O : 0;
+  if (isSwing() && compareTo()) {
+    const cmp = compareTo(), a = dvr(p, current, "2026"), b = dvr(p, cmp.contest, cmp.year);
+    return a && b ? Math.abs((a.d - a.r) - (b.d - b.r)) : 0;
+  }
+  if (view === "turnchg" || current.turnout) {
+    const r = p.y[year], k = r && Object.keys(r).find(k => k.startsWith(TOP_KEY[year]));
+    return k ? d3.sum(Object.values(r[k])) : 0;
+  }
+  const k = contestKey(p, current);
+  return k ? d3.sum(Object.values(res(p)[k])) : 0;
+}
+const bubbleLabel = () => view === "reg" ? "registered voters" : isSwing() && compareTo() ? "net votes the margin moved"
+  : view === "turnchg" || current.turnout ? `votes for ${TOP_KEY[year] === "PRESIDENT" ? "President" : "Governor"}` : "votes cast in this race";
+function drawBubbles(g) {
+  if (!bubblesOn) { g.selectAll("circle").remove(); return; }
+  const data = units.map(f => ({ f, v: bubbleSize(f.properties) })).filter(d => d.v > 0);
+  const max = d3.max(data, d => d.v) || 1;
+  g.selectAll("circle").data(data.sort((a, b) => b.v - a.v), d => unitKey(d.f)).join("circle")
+    .attr("class", d => "bub" + (inScope(d.f) ? "" : " out"))
+    .attr("cx", d => centroidOf(d.f)[0]).attr("cy", d => centroidOf(d.f)[1])
+    .attr("data-r", d => Math.sqrt(d.v / max) * (unitMode === "muni" ? 22 : 14))
+    .attr("fill", d => shade(d.f.properties, current));
+}
+
+// Run fn as if another year were on screen (the second map); views that only exist for 2026 fall back to vote margin
+function withYear(yr, fn) {
+  const y0 = year, v0 = view;
+  year = yr;
+  if (yr !== "2026" && (isSwing() || view === "turnchg")) view = "votes";
+  applyYear();
+  try { return fn(); } finally { year = y0; view = v0; applyYear(); }
+}
+function renderMaps() {
+  paths.attr("fill", f => bubblesOn ? css("--bg") : shade(f.properties, current));
+  drawBubbles(gB);
+  const on = !!sideYear;
+  document.getElementById("maps").classList.toggle("duo", on);
+  document.getElementById("fig2").hidden = !on;
+  document.getElementById("cap1").hidden = !on;
+  if (on) {
+    document.getElementById("cap1").textContent = `${year} · ${VIEWS.find(v => v.id === view).label}`;
+    svg2.attr("viewBox", svg.attr("viewBox"));
+    withYear(sideYear, () => {
+      const hasRace = yearHas(current);
+      gP2.selectAll("path.p").attr("fill", f => !hasRace ? css("--line") : bubblesOn ? css("--bg") : shade(f.properties, current))
+        .classed("out", f => !inScope(f));
+      if (hasRace) drawBubbles(gB2); else gB2.selectAll("circle").remove();
+      document.getElementById("cap2").textContent = hasRace ? `${sideYear} · ${VIEWS.find(v => v.id === view).label}` : `${sideYear} · no ${current.title} race`;
+    });
+  } else gB2.selectAll("circle").remove();
+  sizeBubbles();
+}
+
+// ---------- Sortable table + CSV ----------
+let sortKey = "name", sortDir = 1, tableState = { cols: [], rows: [] };
+const signedPts = v => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
+const signedNum = v => `${v > 0 ? "+" : v < 0 ? "−" : ""}${fmt(Math.abs(v))}`;
+function tableColumns() {
+  const cols = [
+    { key: "name", label: unitMode === "muni" ? "Municipality" : "Precinct", get: p => p.name, text: true },
+    { key: "county", label: "County", get: p => p.county, text: true },
+  ];
+  if (partisan(current)) {
+    cols.push({ key: "votes", label: "Votes", get: p => { const k = contestKey(p, current); return k ? d3.sum(Object.values(res(p)[k])) : null; }, show: fmt, whole: true });
+    cols.push({ key: "margin", label: "Margin", get: p => voteMargin(p, current), show: fmtM, signed: true });
+  }
+  cols.push({ key: "reg", label: "Reg. edge", get: p => regMargin(p), show: fmtM, signed: true });
+  if (partisan(current)) cols.push({ key: "vsreg", label: "Vote vs. reg.", get: p => { const v = voteMargin(p, current), r = regMargin(p); return v == null || r == null ? null : v - r; }, show: fmtM, signed: true });
+  cols.push({ key: "turnout", label: "Turnout", get: p => p.reg && p.ballots != null ? p.ballots / p.reg * 100 : null, show: v => v.toFixed(1) + "%" });
+  if (year === "2026") {
+    CMP_YEARS.forEach(cy => {
+      const cmp = compareTo(cy);
+      if (!cmp) return;
+      cols.push({ key: "chg" + cy, label: `Shift since ${cy}`, get: p => swingOf(p, cy), show: fmtM, signed: true });
+      if (cy === "2022") {
+        const delta = which => p => { const a = dvr(p, current, "2026"), b = dvr(p, cmp.contest, cy); return a && b ? a[which] - b[which] : null; };
+        cols.push({ key: "dd22", label: "D votes vs. 2022", get: delta("d"), show: signedNum, whole: true });
+        cols.push({ key: "dr22", label: "R votes vs. 2022", get: delta("r"), show: signedNum, whole: true });
+      }
+    });
+    cols.push({ key: "turnchg", label: "Turnout vs. 2022", get: p => turnChange(p), show: v => signedPts(v) + " pts" });
+  }
+  return cols;
+}
+function renderTable() {
+  const cols = tableColumns();
+  if (!cols.find(c => c.key === sortKey)) { sortKey = "name"; sortDir = 1; }
+  const ci = cols.findIndex(c => c.key === sortKey), col = cols[ci];
+  const rows = units.filter(f => inScope(f) && res(f.properties)).map(f => ({ f, v: cols.map(c => c.get(f.properties)) }));
+  rows.sort((a, b) => {
+    const x = a.v[ci], y = b.v[ci];
+    if (x == null || y == null) return (x == null) - (y == null);
+    return (col.text ? String(x).localeCompare(String(y)) : x - y) * sortDir;
+  });
+  tableState = { cols, rows };
+  const scope = loadedCounties.filter(c => feats.some(f => inScope(f) && f.properties.county === c));
+  document.getElementById("tbl-title").textContent = unitMode === "muni" ? "Municipalities" : "Precincts";
+  document.getElementById("tbl-eyebrow").textContent = `${year} · ${current.title} · ${scopeLabel(scope)} · ${rows.length} ${unitMode === "muni" ? "municipalities" : "precincts"}`;
+  const cell = (c, v) => {
+    if (v == null) return `<td>–</td>`;
+    if (c.text) return `<td>${v}</td>`;
+    const color = c.signed ? `color:${v >= 0 ? css("--dem") : css("--rep")};font-weight:600` : "";
+    return `<td style="${color}">${c.show(v)}</td>`;
+  };
+  document.getElementById("ptable").innerHTML =
+    `<thead><tr>${cols.map(c => `<th aria-sort="${c.key === sortKey ? (sortDir > 0 ? "ascending" : "descending") : "none"}"><button type="button" data-key="${c.key}" aria-pressed="${c.key === sortKey}">${c.label}${c.key === sortKey ? (sortDir > 0 ? " ▲" : " ▼") : ""}</button></th>`).join("")}</tr></thead>` +
+    `<tbody>${rows.map((r, i) => `<tr data-i="${i}" tabindex="0"${r.f === pinned ? ' class="sel"' : ""}>${r.v.map((v, j) => cell(cols[j], v)).join("")}</tr>`).join("")}</tbody>`;
+}
+function tableCSV() {
+  const { cols, rows } = tableState;
+  const esc = x => /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x;
+  const head = cols.map(c => c.label + (c.signed ? " (+D / -R, pts)" : ""));
+  const body = rows.map(r => r.v.map((v, j) => v == null ? "" : cols[j].text ? v : cols[j].whole ? String(Math.round(v)) : (+v).toFixed(2)));
+  return [head, ...body].map(line => line.map(x => esc(String(x))).join(",")).join("\n");
+}
+function flash(id, text) {
+  const t = document.getElementById(id);
+  t.textContent = text; t.hidden = false;
+  clearTimeout(t._timer); t._timer = setTimeout(() => { t.hidden = true; }, 2200);
+}
+function copyText(text, toastId, done) {
+  const fallback = () => {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) {}
+    ta.remove();
+    flash(toastId, ok ? done : "Copy was blocked here; select the text and copy it yourself");
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => flash(toastId, done), fallback);
+  else fallback();
+}
+
+// ---------- Find a precinct: zoom the map to it and pin it ----------
+function focusUnit(f) {
+  if (!inScope(f)) { countyFilter = "All"; applyCounty(false); }
+  pin(f);
+  const [[x0, y0], [x1, y1]] = path.bounds(f), vb = viewBox;
+  const k = Math.max(1, Math.min(12, 0.45 * Math.min(vb[2] / Math.max(x1 - x0, 1), vb[3] / Math.max(y1 - y0, 1))));
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const t = d3.zoomIdentity.translate(vb[0] + vb[2] / 2 - k * cx, vb[1] + vb[3] / 2 - k * cy).scale(k);
+  if (document.hidden || matchMedia("(prefers-reduced-motion: reduce)").matches) svg.call(zoom.transform, t);
+  else {
+    svg.transition().duration(500).call(zoom.transform, t);
+    // if animation frames are paused the transition never finishes, so land on the precinct directly
+    setTimeout(() => { if (d3.zoomTransform(svg.node()).k !== t.k) { svg.interrupt(); svg.call(zoom.transform, t); } }, 900);
+  }
+  document.querySelector(".mapbox").scrollIntoView({ block: "nearest", behavior: "smooth" });
+  render();
+}
+
+// ---------- Shareable links: the view is written into the page address as #year.race.data.area[.muni][.bub][.vsYYYY] ----------
+function viewToken() {
+  const area = countyFilter === "All" ? "All" : countyFilter.replace(":", "");
+  return [year, current.id, view, area, unitMode === "muni" ? "muni" : null, bubblesOn ? "bub" : null, sideYear ? "vs" + sideYear : null].filter(Boolean).join(".");
+}
+function writeHash() {
+  const t = viewToken();
+  document.getElementById("viewcode").textContent = "#" + t;
+  try { if (location.hash.slice(1) !== t) history.replaceState(null, "", "#" + t); } catch (e) {}
+}
+function readHash() {
+  const h = decodeURIComponent((location.hash || "").slice(1));
+  if (!h) return false;
+  let mode = "precinct", bub = false, side = null;
+  h.split(".").forEach(tok => {
+    if (availableYears.includes(tok)) year = tok;
+    else if (CONTESTS.some(c => c.id === tok)) current = CONTESTS.find(c => c.id === tok);
+    else if (VIEWS.some(v => v.id === tok)) view = tok;
+    else if (tok === "muni") mode = "muni";
+    else if (tok === "bub") bub = true;
+    else if (/^vs\d{4}$/.test(tok) && availableYears.includes(tok.slice(2))) side = tok.slice(2);
+    else {
+      const a = /^(SD|HD)\d+$/.test(tok) ? tok.slice(0, 2) + ":" + tok.slice(2) : tok;
+      if (a === "All" || areaBox[a]) countyFilter = a;
+    }
+  });
+  bubblesOn = bub; sideYear = side;
+  if (mode !== unitMode) { unitMode = mode; units = mode === "muni" ? muniUnits : planar.features; pinned = null; drawUnits(); }
+  return true;
+}
+
+function renderChrome() {
+  const srcs = SOURCES[year] || {};
+  document.getElementById("sources").innerHTML = `<p><b>${year} results:</b> ${Object.entries(srcs).map(([c, s]) => `${c}: ${s}.`).join(" ") || "None loaded yet."} Unofficial totals may change as remaining mail and provisional ballots are counted.</p>
+    <p><b>Registration:</b> ${REG_SOURCE}. The 2026 rolls are from before the November election, so they differ slightly from the counties' election-night registered-voter counts. 2024 results and registration are joined to the 2026 precincts by state precinct code; every mapped 2026 precinct existed under the same code in 2024. Combined precincts add their registration together; Butler Township Dist 05 includes both its PA-8 and PA-9 voters.</p>
+    <p><b>Boundaries:</b> U.S. Census Bureau 2020 TIGER/Line voting districts. Every loaded precinct matches a 2020 voting district by name; boundary changes since 2020 are not shown. Thin lines are precincts, medium lines municipalities, heavy lines counties, dashed lines legislative districts. Wayne, Pike and Luzerne reports have no party labels, so their candidates are matched to parties by name and ballot order. Pike's Matamoras and Luzerne's Hazle Township Dist 01 each combine two 2020 voting districts. Luzerne's 27 PA-9 precincts are left off; Butler Township Dist 05 is split between PA-8 and PA-9. Monroe's PA-7 precincts (Eldred, Polk, Ross One) are left off. Monroe has not published precinct boundaries drawn since 2020: Middle Smithfield's 4 precincts are shown as two areas matching the 2020 Census districts (West: One and Two; East: Three and Four), and Tunkhannock's 2 as the whole township, and Ross Two is Ross Township cut along the PA-8 line. Monroe publishes no precinct turnout.</p>`;
+}
+
+function render() {
+  applyYear();
+  if (!yearHas(current)) current = CONTESTS.find(c => c.id === "cong" && yearHas(c)) || CONTESTS.find(yearHas);
+  if (isSwing() && !compareTo()) view = "votes";
+  if (view === "turnchg" && year !== "2026") view = "votes";
+  if (sideYear === year) sideYear = availableYears.find(y => y !== year);
+  if (current.districts) {
+    distPath.attr("d", path(topojson.mesh(topo, topo.objects.p, (a, b) => a !== b && contestKey(a.properties, current) !== contestKey(b.properties, current))));
+  } else distPath.attr("d", null);
+  renderMaps();
+  renderTotals(); renderLegend(); renderChrome();
+  renderDetail(pinned ? pinned.properties : null);
+  renderTable();
+  writeHash();
+  document.getElementById("unit-precinct").setAttribute("aria-pressed", unitMode === "precinct");
+  document.getElementById("unit-muni").setAttribute("aria-pressed", unitMode === "muni");
+  document.getElementById("bubbles").setAttribute("aria-pressed", bubblesOn);
+  document.getElementById("side").setAttribute("aria-pressed", !!sideYear);
+  document.querySelectorAll("#display .sidey").forEach(b => {
+    b.hidden = !sideYear || b.dataset.year === year;
+    b.setAttribute("aria-pressed", b.dataset.year === sideYear);
+  });
+  document.querySelectorAll("#tabs button").forEach(b => {
+    const c = CONTESTS.find(x => x.id === b.dataset.id);
+    b.hidden = !yearHas(c);
+    b.setAttribute("aria-pressed", c === current);
+  });
+  document.querySelectorAll("#years button").forEach(b => b.setAttribute("aria-pressed", b.dataset.year === year));
+  document.querySelectorAll("#counties button, #senate button, #housed button").forEach(b => b.setAttribute("aria-pressed", b.dataset.county === countyFilter));
+  document.querySelectorAll("#views button").forEach(b => {
+    b.setAttribute("aria-pressed", b.dataset.view === view);
+    const sw = b.dataset.view.startsWith("swing");
+    b.disabled = (b.dataset.view === "shift" && !partisan(current)) || (sw && !compareTo(b.dataset.view.slice(5))) || (b.dataset.view === "turnchg" && year !== "2026");
+    b.title = !b.disabled ? "" : sw ? "Available for 2026 U.S. House and Governor" : b.dataset.view === "turnchg" ? "Available for 2026" : "Pick a partisan race to compare with registration";
+  });
+}
+
+const viewsEl = document.getElementById("views");
+VIEWS.forEach(v => {
+  const b = document.createElement("button");
+  b.type = "button"; b.id = "view-" + v.id; b.dataset.view = v.id; b.textContent = v.label;
+  b.onclick = () => { view = v.id; render(); };
+  viewsEl.appendChild(b);
+});
+
+const yearsEl = document.getElementById("years");
+YEARS.forEach(y => {
+  const b = document.createElement("button");
+  b.type = "button"; b.id = "year-" + y; b.dataset.year = y; b.textContent = y;
+  if (!availableYears.includes(y)) { b.disabled = true; b.title = `${y} results not loaded yet`; }
+  b.onclick = () => { year = y; render(); };
+  yearsEl.appendChild(b);
+});
+const tabs = document.getElementById("tabs");
+CONTESTS.forEach(c => {
+  const b = document.createElement("button");
+  b.type = "button"; b.id = "tab-" + c.id; b.dataset.id = c.id; b.textContent = c.label;
+  b.onclick = () => { current = c; try { localStorage.setItem("contest", c.id); } catch (e) {} render(); };
+  tabs.appendChild(b);
+});
+try { const c = CONTESTS.find(x => x.id === localStorage.getItem("contest")); if (c) current = c; } catch (e) {}
+const countiesEl = document.getElementById("counties");
+["All", ...DISTRICT_COUNTIES.filter(c => loadedCounties.includes(c))].forEach(c => {
+  const b = document.createElement("button");
+  b.type = "button"; b.id = "county-" + c; b.dataset.county = c;
+  b.textContent = c === "All" ? "All of PA-8" : c;
+  b.onclick = () => { countyFilter = c; try { localStorage.setItem("county", c); } catch (e) {} applyCounty(true); render(); };
+  countiesEl.appendChild(b);
+});
+const senateEl = document.getElementById("senate");
+senateDistricts.forEach(d => {
+  const b = document.createElement("button");
+  b.type = "button"; b.id = "senate-" + d; b.dataset.county = "SD:" + d; b.textContent = ordinal(String(d)) + " District";
+  b.onclick = () => { countyFilter = b.dataset.county; try { localStorage.setItem("county", countyFilter); } catch (e) {} applyCounty(true); render(); };
+  senateEl.appendChild(b);
+});
+const housedEl = document.getElementById("housed");
+houseDistricts.forEach(d => {
+  const b = document.createElement("button");
+  b.type = "button"; b.id = "housed-" + d; b.dataset.county = "HD:" + d; b.textContent = ordinal(String(d));
+  b.onclick = () => { countyFilter = b.dataset.county; try { localStorage.setItem("county", countyFilter); } catch (e) {} applyCounty(true); render(); };
+  housedEl.appendChild(b);
+});
+try { const c = localStorage.getItem("county"); if (c && (c === "All" || areaBox[c])) countyFilter = c; } catch (e) {}
+
+// Display row: precincts or municipalities, vote bubbles, side-by-side years
+const displayEl = document.getElementById("display");
+const addBtn = (id, text, onclick, cls) => {
+  const b = document.createElement("button");
+  b.type = "button"; b.id = id; b.textContent = text; b.onclick = onclick;
+  if (cls) b.className = cls;
+  displayEl.appendChild(b);
+  return b;
+};
+const setUnits = mode => {
+  if (mode === unitMode) return;
+  unitMode = mode; units = mode === "muni" ? muniUnits : planar.features; pinned = null;
+  drawUnits(); applyCounty(false); render();
+};
+addBtn("unit-precinct", "Precincts", () => setUnits("precinct"));
+addBtn("unit-muni", "Municipalities", () => setUnits("muni"));
+addBtn("bubbles", "Vote bubbles", () => { bubblesOn = !bubblesOn; render(); });
+addBtn("side", "Side by side", () => { sideYear = sideYear ? null : (year === "2026" ? "2022" : "2026"); render(); });
+availableYears.forEach(y => { const b = addBtn("side-" + y, "vs " + y, () => { sideYear = y; render(); }, "sidey"); b.dataset.year = y; b.hidden = true; });
+
+// Search box
+const searchEl = document.getElementById("search"), sresEl = document.getElementById("sresults");
+let matches = [], active = 0;
+function showMatches() {
+  const q = searchEl.value.trim().toLowerCase();
+  matches = q ? units.filter(f => (f.properties.name + " " + f.properties.muni + " " + f.properties.county).toLowerCase().includes(q)).slice(0, 10) : [];
+  active = 0;
+  sresEl.innerHTML = matches.map((f, i) => `<li role="option" data-i="${i}" aria-selected="${i === 0}">${f.properties.name}<span>${f.properties.county}</span></li>`).join("")
+    || (q ? `<li aria-disabled="true">No match in ${unitMode === "muni" ? "municipalities" : "precincts"}</li>` : "");
+  sresEl.hidden = !q;
+}
+function choose(i) {
+  const f = matches[i];
+  if (!f) return;
+  searchEl.value = f.properties.name; sresEl.hidden = true;
+  focusUnit(f);
+}
+searchEl.addEventListener("input", showMatches);
+searchEl.addEventListener("keydown", ev => {
+  if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+    ev.preventDefault();
+    active = Math.max(0, Math.min(matches.length - 1, active + (ev.key === "ArrowDown" ? 1 : -1)));
+    sresEl.querySelectorAll("li").forEach((li, i) => li.setAttribute("aria-selected", i === active));
+  } else if (ev.key === "Enter") { ev.preventDefault(); choose(active); }
+  else if (ev.key === "Escape") sresEl.hidden = true;
+});
+sresEl.addEventListener("mousedown", ev => { const li = ev.target.closest("li[data-i]"); if (li) { ev.preventDefault(); choose(+li.dataset.i); } });
+searchEl.addEventListener("blur", () => setTimeout(() => { sresEl.hidden = true; }, 150));
+
+// Table: sort by heading, click a row to find it on the map, copy or download as CSV
+document.getElementById("ptable").addEventListener("click", ev => {
+  const btn = ev.target.closest("th button");
+  if (btn) {
+    if (btn.dataset.key === sortKey) sortDir = -sortDir;
+    else { sortKey = btn.dataset.key; const c = tableState.cols.find(c => c.key === sortKey); sortDir = c && c.text ? 1 : -1; }
+    renderTable();
+    return;
+  }
+  const tr = ev.target.closest("tbody tr");
+  if (tr) focusUnit(tableState.rows[+tr.dataset.i].f);
+});
+document.getElementById("ptable").addEventListener("keydown", ev => {
+  const tr = ev.target.closest("tbody tr");
+  if (tr && ev.key === "Enter") focusUnit(tableState.rows[+tr.dataset.i].f);
+});
+document.getElementById("csv-copy").onclick = () => copyText(tableCSV(), "csvtoast", `Copied ${tableState.rows.length} rows`);
+document.getElementById("csv-dl").onclick = () => {
+  const area = countyFilter === "All" ? "pa8" : countyFilter.replace(":", "").toLowerCase();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([tableCSV()], { type: "text/csv" }));
+  a.download = `${area}-${year}-${current.id}-${unitMode}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  flash("csvtoast", "If nothing downloaded, use Copy CSV");
+};
+document.getElementById("copylink").onclick = () => copyText(location.href.split("#")[0] + "#" + viewToken(), "linktoast", "Link copied");
+
+readHash();
+window.addEventListener("hashchange", () => { if (location.hash.slice(1) !== viewToken() && readHash()) { applyCounty(false); render(); } });
+applyCounty(false);
+document.getElementById("zoom-in").onclick = () => zoomBy(1.6);
+document.getElementById("zoom-out").onclick = () => zoomBy(1 / 1.6);
+document.getElementById("zoom-reset").onclick = () => zoomReset(true);
+render();
+
+// Re-read color tokens when the theme changes
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+</script>
